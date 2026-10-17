@@ -6,9 +6,11 @@
 #  Feed it a base ROM and a port ROM, walk away, come back to a
 #  flashable zip. Espresso in, ColorOS out.
 #
-#  Usage:  ./brina.sh [--Brina] <BASEROM> <PORTROM> [PORTROM2] [PARTS]
+#  Usage:  ./brina.sh [--Brina] [--kernel <ZIP|URL>] <BASEROM> <PORTROM> [PORTROM2] [PARTS]
 #          --Brina applies the BrinaOS branding (wordmark, OTA card, setup-wizard
 #          theme, boot animation, Sabrina build props). Omit it for a clean port.
+#          --kernel builds boot.img from that AnyKernel3 zip (e.g. the Feather
+#          ColorOS 17 kernel) instead of any zip in devices/<device>/.
 #  Setup:  ./willpower.sh   (run this first -- it installs the deps)
 #  Helpers live in caffeine.sh.
 #
@@ -21,6 +23,22 @@
 #
 #  Please please please read the docs before you flash. 🥺
 
+brina_self=$(readlink -f "${BASH_SOURCE[0]}")
+
+# PACK_ONLY=true ./brina.sh packs a tree saved by STOP_BEFORE_PACK=true, so a
+# packing tweak does not mean re-running the whole port.
+if [[ "${PACK_ONLY:-false}" == "true" ]]; then
+    __po_st=build/portrom/.prepack_state.sh
+    [[ -f "$__po_st" ]] || { echo "PACK_ONLY: $__po_st missing -- run STOP_BEFORE_PACK=true first"; exit 1; }
+    __po_now=$(sha256sum "$brina_self" | cut -d' ' -f1)
+    source "$__po_st"
+    [[ "$__po_now" == "$_prepack_sha" ]] || { echo "PACK_ONLY: brina.sh changed since the state was saved -- rebuild"; exit 1; }
+    unset STOP_BEFORE_PACK
+    __po_from=$(grep -n '^# STOP_BEFORE_PACK_MARKER$' "$brina_self" | head -1 | cut -d: -f1)
+    source <(tail -n +"${__po_from}" "$brina_self")
+    exit $?
+fi
+
 build_user="Sabrina Carpenter"
 build_host="ReVork"
 
@@ -28,10 +46,19 @@ build_host="ReVork"
 # it the script produces a clean port with none of the BrinaOS cosmetics. Pull the
 # flag out of the args first so the positional BASEROM/PORTROM below still line up.
 brina_mode=false
+# --kernel <zip|url> (or KERNEL_ZIP=...) picks the AnyKernel3 zip boot.img is
+# built from, instead of whatever zip sits in devices/<device>/.
+kernel_zip="${KERNEL_ZIP:-}"
 _args=()
+_want_kernel=false
 for _a in "$@"; do
+    if [[ $_want_kernel == true ]]; then
+        kernel_zip="$_a"; _want_kernel=false; continue
+    fi
     case "$_a" in
         --Brina|--brina) brina_mode=true ;;
+        --kernel=*) kernel_zip="${_a#--kernel=}" ;;
+        --kernel) _want_kernel=true ;;
         *) _args+=("$_a") ;;
     esac
 done
@@ -484,6 +511,18 @@ if [ -z "$base_regionmark" ]; then
   base_regionmark=$(find build/baserom/images/ -name build.prop -exec grep -m1 "ro.oplus.image.my_region.type=" {} \; -quit | cut -d '=' -f2 | cut -d '_' -f1)
 fi
 
+# The radio stack and carrier config follow the baserom's region, so a portrom
+# from another region has to be told it lives where the modem does.
+if [ -n "$base_regionmark" ] && [ "$base_regionmark" != "$regionmark" ]; then
+    yellow "regionmark mismatch: portrom says '${regionmark}', baserom says '${base_regionmark}' -- using baserom's"
+    for _rf in $(find build/portrom/images/ -name build.prop -exec grep -l "ro.vendor.oplus.regionmark=${regionmark}\|ro.vendor.oplus.radio.sar_regionmark=${regionmark}" {} \;); do
+        sed -i "s/ro.vendor.oplus.regionmark=${regionmark}/ro.vendor.oplus.regionmark=${base_regionmark}/" "$_rf"
+        sed -i "s/ro.vendor.oplus.radio.sar_regionmark=${regionmark}/ro.vendor.oplus.radio.sar_regionmark=${base_regionmark}/" "$_rf"
+    done
+    unset _rf
+    regionmark="$base_regionmark"
+fi
+
 vendor_cpu_abilist32=$(< build/portrom/images/vendor/build.prop grep "ro.vendor.product.cpu.abilist32" |awk 'NR==1' |cut -d '=' -f 2 )
 
 base_area=$(grep -r --include="*.prop" --exclude-dir="odm" "ro.oplus.image.system_ext.area" build/baserom/images/ | head -n1 | cut -d "=" -f2 | tr -d '\r')
@@ -562,6 +601,12 @@ PORT_ENABLE_32BIT=${PORT_ENABLE_32BIT:-true}
 # starts. That combination is the one that boots. Cost: no 32-bit app support.
 PORT_ENABLE_32BIT_ZYGOTE=${PORT_ENABLE_32BIT_ZYGOTE:-false}
 
+# How the 32-bit runtime gets in when the portrom is pure-64:
+#   closure (default) - only the linker, bionic and the DT_NEEDED closure of the
+#                       vendor's own ELF32 binaries, taken from the baserom
+#   pack              - the generic devices/common/32bit-compatibility.zip
+PORT_32BIT_METHOD=${PORT_32BIT_METHOD:-closure}
+
 # SELinux enforcement for the vendor_boot that ships in the OTA. The port's
 # policy has never been audited against this base device's vendor, and the only
 # build that has ever reached the home screen did it with permissive set here.
@@ -576,7 +621,10 @@ PORT_SELINUX_PERMISSIVE=${PORT_SELINUX_PERMISSIVE:-true}
 # 32-bit runtime so the vendor's request can actually be served.
 if [[ "$PORT_ENABLE_32BIT" == "true" && ! -f build/portrom/images/system/system/bin/app_process32 && -n "$vendor_cpu_abilist32" ]]; then
     blue "64bit only portrom detected"
-    if [[ -f devices/common/32bit-compatibility.zip ]];then
+    if [[ "$PORT_32BIT_METHOD" != "pack" ]];then
+        blue "Shipping the vendor's 32-bit closure from the baserom"
+        inject_vendor32_closure || error "vendor 32-bit closure failed, the vendor's 32-bit HALs will not start"
+    elif [[ -f devices/common/32bit-compatibility.zip ]];then
         unzip -o devices/common/32bit-compatibility.zip -d build/portrom/images/ > /dev/null || error "Failed to extract 32bit-compatibility.zip"
         # the zip ships the compressed ART apex; leaving an uncompressed one
         # beside it gives apexd two copies of the same module
@@ -2453,7 +2501,23 @@ echo "ZWNobyAiSnVuaSB3YXMgaGVyZSIgPj4gYnVpbGQvcG9ydHJvbS9pbWFnZXMvc3lzdGVtX2V4dC
 cp devices/common/espresso.prop build/portrom/images/product/etc/
 echo "import /product/etc/espresso.prop" >> build/portrom/images/system/system/build.prop
 
-for zip in $(find devices/${base_product_device}/ -name "*.zip"); do
+kernel_zips=$(find devices/${base_product_device}/ -name "*.zip")
+if [[ -n "$kernel_zip" ]]; then
+    if [[ ! -f "$kernel_zip" ]] && [[ "$kernel_zip" == http* ]]; then
+        blue "Downloading kernel: $kernel_zip"
+        mkdir -p tmp/kernel_dl
+        aria2c -c --file-allocation=none -s10 -x10 -d tmp/kernel_dl "$kernel_zip" || error "Kernel download failed"
+        kernel_zip=$(find tmp/kernel_dl -maxdepth 1 -name '*.zip' | head -n 1)
+    fi
+    if [[ -f "$kernel_zip" ]] && unzip -l "$kernel_zip" | grep -q "anykernel.sh"; then
+        blue "Using kernel from --kernel: $kernel_zip"
+        kernel_zips="$kernel_zip"
+    else
+        error "--kernel '$kernel_zip' is not an AnyKernel3 zip, keeping the stock kernel"
+        kernel_zips=""
+    fi
+fi
+for zip in $kernel_zips; do
     if unzip -l $zip | grep -q "anykernel.sh" ;then
         blue "Custom Kernel zip $zip detected [Anykernel]"
         if echo $zip | grep -q ".*-KSU" ; then
@@ -2476,11 +2540,12 @@ for anykernel_dir in tmp/anykernel*; do
             patch_kernel "$kernel_file" "$dtb_file" "boot_ksu.img"
             blue "New boot_ksu.img generated"
         elif [[ "$anykernel_dir" == *"-noksu"* ]]; then
-            cp $dtbo_img ${work_dir}/devices/$base_product_device/dtbo_noksu.img
+            [[ -f $dtbo_img ]] && cp $dtbo_img ${work_dir}/devices/$base_product_device/dtbo_noksu.img
             patch_kernel "$kernel_file" "$dtb_file" "boot_noksu.img"
             blue "New boot_noksu.img generated"
         else
-            cp $dtbo_img ${work_dir}/devices/$base_product_device/dtbo_custom.img
+            # a kernel-only zip (stock dtb/dtbo kept) ships no dtbo.img
+            [[ -f $dtbo_img ]] && cp $dtbo_img ${work_dir}/devices/$base_product_device/dtbo_custom.img
             patch_kernel "$kernel_file" "$dtb_file" "boot_custom.img"
             blue "New boot_custom.img generated"
         fi
@@ -2703,6 +2768,191 @@ if [[ $portIsColorOSGlobal == true ]]; then
     install_prebuilt_rro DualRowStatusBar
 fi
 
+
+# ── Old-vendor compatibility (from the OnePlus 8T COS17 port, @pedestrian1603) ─
+# Each fix checks the vendor it is running against and skips itself when the
+# vendor does not need it, so a newer base device is left alone.
+
+# A replaced apk/jar must not keep the fs-verity metadata of the file it replaced
+if [ -n "${app_patch_folder}" ] && [ -d "build/${app_patch_folder}/patched" ]; then
+    for _n in $(ls "build/${app_patch_folder}/patched"); do
+        find build/portrom/images -name "${_n}.fsv_meta" -not -path "*/patched/*" -delete
+    done
+fi
+unset _n
+
+# Old qcril holds incoming SMS for an ATEL "UI ready" signal the new framework
+# never sends, and drops them after 20 s. Keep its power-on optimisation off.
+_ql=build/portrom/images/vendor/lib64/libril-qc-hal-qmi.so
+if [ -f "${_ql}" ] && grep -qa "persist.vendor.radio.poweron_opt" "${_ql}"; then
+    _vp=build/portrom/images/vendor/build.prop
+    if grep -q '^persist.vendor.radio.poweron_opt=' "${_vp}"; then
+        sed -i 's/^persist.vendor.radio.poweron_opt=.*/persist.vendor.radio.poweron_opt=0/' "${_vp}"
+    else
+        echo 'persist.vendor.radio.poweron_opt=0' >> "${_vp}"
+    fi
+    mkdir -p build/portrom/images/odm/etc/init
+    cat > build/portrom/images/odm/etc/init/port_sms_poweron_opt.rc <<'RC_EOF'
+# keep qcril power-opt off, otherwise incoming SMS are held for an ATEL UI-ready
+# signal this framework never sends and are dropped after 20 s.
+on property:persist.vendor.radio.poweron_opt=1
+    setprop persist.vendor.radio.poweron_opt 0
+RC_EOF
+    blue "sms_poweron_opt: qcril power-opt forced off (incoming SMS fix)"
+fi
+unset _ql _vp
+
+# AI features load odm's libaiboost from app processes: export it and label it
+# as a same-process HAL so the app namespace may open it
+if [ -f build/portrom/images/odm/lib64/libaiboost.so ] && [ -f build/portrom/images/vendor/etc/public.libraries.txt ]; then
+    _pl=build/portrom/images/vendor/etc/public.libraries.txt
+    grep -qx 'libaiboost.so' "${_pl}" || { [ -n "$(tail -c1 "${_pl}")" ] && echo >> "${_pl}"; echo 'libaiboost.so' >> "${_pl}"; }
+    for _fc in build/portrom/images/config/odm_file_contexts build/portrom/images/odm/etc/selinux/odm_file_contexts; do
+        [ -f "${_fc}" ] || continue
+        sed -i '/^\/odm\/lib\(64\)\?\/libaiboost/d' "${_fc}"
+        for _d in lib lib64; do
+            for _l in libaiboost libaiboost_hexagon; do
+                [ -f "build/portrom/images/odm/${_d}/${_l}.so" ] && \
+                    echo "/odm/${_d}/${_l}\.so u:object_r:same_process_hal_file:s0" >> "${_fc}"
+            done
+        done
+    done
+    blue "aiboost_public_lib: libaiboost.so exported to apps"
+fi
+unset _pl _fc _d _l
+
+# Kernels that still expose the legacy ION node need it labelled, and a new
+# portrom no longer carries the label
+if ! find build/portrom/images -path '*/config' -prune -o -path '*/etc/selinux/*file_contexts' -print 2>/dev/null \
+        | xargs -r grep -qs '^/dev/ion[[:space:]]'; then
+    _sfc=build/portrom/images/system_ext/etc/selinux/system_ext_file_contexts
+    if [ -f "${_sfc}" ]; then
+        printf '\n# legacy ION node (msm 4.19 / 5.4 kernels)\n/dev/ion u:object_r:ion_device:s0\n' >> "${_sfc}"
+        blue "dev_ion_label: /dev/ion -> ion_device"
+    fi
+    unset _sfc
+fi
+
+# The vendor advertises a hardware AAC encoder its media_codecs does not list,
+# so recording picks a codec that is not there
+_aacp=$(grep -rlsE '^(vendor\.audio\.hw\.aac\.encoder|qcom\.hw\.aac\.encoder)=true' build/portrom/images/vendor build/portrom/images/odm --include='*.prop' 2>/dev/null)
+if [ -n "${_aacp}" ] && ! grep -rqs 'OMX.qcom.audio.encoder.aac' build/portrom/images/vendor/etc build/portrom/images/odm/etc --include='media_codecs*.xml'; then
+    for _f in ${_aacp}; do
+        sed -i -E 's/^(vendor\.audio\.hw\.aac\.encoder|qcom\.hw\.aac\.encoder)=true/\1=false/' "${_f}"
+    done
+    blue "hw_aac_encoder_off: hardware AAC encoder disabled"
+fi
+unset _aacp _f
+
+# 2G on by default in the CN carrier config
+_cc="build/portrom/images/my_region/etc/extension/oplus_carrier_config.xml"
+if [ -f "${_cc}" ] && ! grep -q 'name="allow2G_status"' "${_cc}"; then
+    sed -i 's#</carrier_config>#        <int name="allow2G_visible" value="1"/>\n        <int name="allow2G_status" value="1"/>\n        <boolean name="is_need_remove_2g_when_allow2g_closed" value="false"/>\n</carrier_config>#' "${_cc}"
+    blue "allow2g_default: 2G enabled by default"
+fi
+unset _cc
+
+# Android 16+ runs the camera app as priv_app_36, which the old vendor's
+# camera HAL policy has never heard of
+_se="build/portrom/images/system_ext/etc/selinux/system_ext_sepolicy.cil"
+_plat="build/portrom/images/system/system/etc/selinux/plat_sepolicy.cil"
+_vse="build/portrom/images/vendor/etc/selinux/vendor_sepolicy.cil"
+_ok=true
+[ -f "${_se}" ] && [ -f "${_plat}" ] && [ -f "${_vse}" ] || _ok=false
+${_ok} && grep -q '^(type priv_app_36)' "${_plat}" || _ok=false
+for _t in hal_camera_default vendor_hal_camera_postproc_hwservice vendor_system_prop vendor_default_prop; do
+    ${_ok} && grep -qE "^\((type|typeattribute) ${_t}\)" "${_vse}" "${_plat}" || _ok=false
+done
+if ${_ok}; then
+    for _r in \
+        "(allow priv_app_36 vendor_hal_camera_postproc_hwservice (hwservice_manager (find)))" \
+        "(allow priv_app_36 vendor_system_prop (file (read getattr map open)))" \
+        "(allow priv_app_36 hal_camera_default (binder (call transfer)))" \
+        "(allow hal_camera_default priv_app_36 (binder (call transfer)))" \
+        "(allow priv_app_36 vendor_default_prop (file (read getattr map open)))"; do
+        grep -qxF "${_r}" "${_se}" || echo "${_r}" >> "${_se}"
+    done
+    blue "camera_priv_app_36_sepolicy: rules applied"
+fi
+unset _se _plat _vse _ok _t _r
+
+# The 8T port's jar/lib patchers. They live in devices/common/port_patches/
+# (ask @pedestrian1603 for them); each one runs only when this vendor needs it.
+_pp=devices/common/port_patches
+_osj=$(find build/portrom/images/system -path '*/framework/oplus-services.jar' 2>/dev/null | head -1)
+_qspm_svc=$(cat $(find build/portrom/images/vendor/etc/vintf build/portrom/images/odm/etc/vintf -name '*.xml' 2>/dev/null) /dev/null 2>/dev/null \
+    | tr -d '\n' | grep -o '<hal format="aidl"[^>]*>[^<]*<name>vendor.qti.qspmhal</name>' | head -1)
+if [ -n "${_osj}" ] && [ -z "${_qspm_svc}" ]; then
+    # vendor has no AIDL qspmhal: stock oplus-services.jar boot-loops system_server
+    if [ -f "${_pp}/patch_oplus_services_qspm.py" ]; then
+        _w=tmp/oplus_services_qspm; rm -rf "${_w}"; mkdir -p "${_w}"
+        if java -jar bin/apktool/APKEditor.jar d -f -i "${_osj}" -o "${_w}/d" >/dev/null 2>&1 \
+            && python3 "${_pp}/patch_oplus_services_qspm.py" "${_w}/d" \
+            && java -jar bin/apktool/APKEditor.jar b -f -i "${_w}/d" -o "${_w}/oplus-services.jar" >/dev/null 2>&1 \
+            && [ -s "${_w}/oplus-services.jar" ]; then
+            cp -f "${_w}/oplus-services.jar" "${_osj}"
+            rm -f "${_osj}.fsv_meta" "$(dirname "${_osj}")"/oat/*/oplus-services.{odex,vdex,art}
+            blue "oplus_services_qspm: oplus-services.jar patched (vendor has no AIDL qspmhal)"
+        else
+            error "oplus_services_qspm: patch FAILED - system_server will boot-loop on this vendor"
+            exit 1
+        fi
+        rm -rf "${_w}"; unset _w
+    else
+        error "oplus_services_qspm: vendor has no AIDL qspmhal and ${_pp}/patch_oplus_services_qspm.py is missing - expect a system_server boot-loop"
+    fi
+fi
+unset _osj _qspm_svc
+_sf=$(find build/portrom/images/system -path '*/lib64/libstagefright.so' 2>/dev/null | head -1)
+_vndk=$(grep -rhs -m1 '^ro.vndk.version=' build/portrom/images/vendor build/portrom/images/odm --include='*.prop' 2>/dev/null | head -1 | cut -d= -f2 | tr -dc '0-9')
+if [ -n "${_sf}" ] && [ -n "${_vndk}" ] && [ "${_vndk}" -le 33 ] 2>/dev/null; then
+    if [ -f "${_pp}/patch_stagefright_gen.py" ]; then
+        if python3 "${_pp}/patch_stagefright_gen.py" "${_sf}"; then
+            rm -f "${_sf}.fsv_meta"
+            blue "stagefright_gen: libstagefright.so patched (vendor vndk ${_vndk})"
+        else
+            error "stagefright_gen: patch FAILED - video/codec surfaces may break"
+            exit 1
+        fi
+    else
+        yellow "stagefright_gen: vendor vndk ${_vndk} wants ${_pp}/patch_stagefright_gen.py, not found - video may break"
+    fi
+fi
+unset _sf _vndk
+if [ -f "${_pp}/vintf_ueventd_fixups.py" ]; then
+    python3 "${_pp}/vintf_ueventd_fixups.py" build/portrom/images || error "vintf_ueventd_fixups failed"
+fi
+if [ -f "${_pp}/patch_subsys_radio_v1.py" ] && [ ! -f build/portrom/images/vendor/lib64/vendor.oplus.hardware.subsys_radio-V2-ndk_platform.so ]; then
+    for _j in oplus-subsystem-service oplus-subsystem-service-ext; do
+        _f="build/portrom/images/system_ext/framework/${_j}.jar"
+        [ -f "${_f}" ] || continue
+        rm -rf "tmp/subsys_${_j}" "tmp/subsys_${_j}.jar"; mkdir -p tmp
+        if java -jar bin/apktool/APKEditor.jar d -f -i "${_f}" -o "tmp/subsys_${_j}" >/dev/null 2>&1 \
+           && python3 "${_pp}/patch_subsys_radio_v1.py" "tmp/subsys_${_j}" \
+           && java -jar bin/apktool/APKEditor.jar b -f -i "tmp/subsys_${_j}" -o "tmp/subsys_${_j}.jar" >/dev/null 2>&1; then
+            cp -f "tmp/subsys_${_j}.jar" "${_f}"
+            rm -f "${_f}.fsv_meta" build/portrom/images/system_ext/framework/oat/*/"${_j}".{odex,vdex,art}
+            blue "subsys_radio_v1: ${_j} patched for the V1 HAL"
+        else
+            yellow "subsys_radio_v1: ${_j} NOT patched -- second SIM will likely fail"
+        fi
+    done
+    unset _j _f
+fi
+unset _pp
+
+# ── Resume point: STOP_BEFORE_PACK=true saves the tree here, PACK_ONLY=true
+#    packs it without redoing every step above ──
+# STOP_BEFORE_PACK_MARKER
+if [[ "${STOP_BEFORE_PACK:-false}" == "true" ]]; then
+    green "STOP_BEFORE_PACK: all fixes applied, skipping packing"
+    _skip='^(BASH[A-Z_]*|BASHOPTS|SHELLOPTS|EUID|PPID|UID|GROUPS|FUNCNAME|PIPESTATUS|DIRSTACK|RANDOM|SRANDOM|LINENO|SECONDS|HISTCMD|EPOCHREALTIME|EPOCHSECONDS|SHLVL|PWD|OLDPWD|_|COLUMNS|LINES|STOP_BEFORE_PACK|PACK_ONLY)='
+    { echo "_prepack_sha=$(sha256sum "${brina_self}" | cut -d' ' -f1)"
+      declare -p | grep -vE '^declare -[a-zA-Z]*r' | grep -vE "^declare -[-a-zA-Z]* ${_skip#^}"
+      declare -f; } > build/portrom/.prepack_state.sh
+    blue "state saved: PACK_ONLY=true ./brina.sh packs this tree"
+    exit 0
+fi
 
 sparkle "🎀  packing it all up"
 green "Super image size: ${superSize}"
@@ -3118,13 +3368,19 @@ else
     elif [[ -f "$custom_bootimg_file" ]];then
         custombootimg=$(basename "$custom_bootimg_file")
         mv -f $custom_bootimg_file out/${os_type}_${rom_version}/
-        mv -f  devices/$base_product_device/dtbo_custom.img out/${os_type}_${rom_version}/firmware-update/dtbo_custom.img
         sed -i "s/boot_tv.img/$custombootimg/g" out/${os_type}_${rom_version}/META-INF/com/google/android/update-binary
         sed -i "s/boot_tv.img/$custombootimg/g" out/${os_type}_${rom_version}/windows_flash_script.bat
         sed -i "s/boot_tv.img/$custombootimg/g" out/${os_type}_${rom_version}/mac_linux_flash_script.sh
-        sed -i "s/dtbo_tv.img/dtbo_custom.img/g" out/${os_type}_${rom_version}/META-INF/com/google/android/update-binary
-        sed -i "s/dtbo_tv.img/dtbo_custom.img/g" out/${os_type}_${rom_version}/windows_flash_script.bat
-        sed -i "s/dtbo_tv.img/dtbo_custom.img/g" out/${os_type}_${rom_version}/mac_linux_flash_script.sh
+        # A kernel-only zip (the Feather ColorOS 17 kernel) keeps the stock
+        # dtbo, so point the custom-boot path at it instead of a missing file.
+        custom_dtbo=dtbo.img
+        if [[ -f devices/$base_product_device/dtbo_custom.img ]];then
+            mv -f  devices/$base_product_device/dtbo_custom.img out/${os_type}_${rom_version}/firmware-update/dtbo_custom.img
+            custom_dtbo=dtbo_custom.img
+        fi
+        sed -i "s/dtbo_tv.img/${custom_dtbo}/g" out/${os_type}_${rom_version}/META-INF/com/google/android/update-binary
+        sed -i "s/dtbo_tv.img/${custom_dtbo}/g" out/${os_type}_${rom_version}/windows_flash_script.bat
+        sed -i "s/dtbo_tv.img/${custom_dtbo}/g" out/${os_type}_${rom_version}/mac_linux_flash_script.sh
         
     fi
 

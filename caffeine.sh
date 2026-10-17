@@ -475,7 +475,7 @@ patch_kernel() {
             cd ..
         fi
 
-        if [ -f dtb ]; then
+        if [ -f dtb ] && [[ -n $dtb_file ]]; then
             blue "Replacing dtb"
             cp -fv "$dtb_file" "${vendor_boot_tmp}/dtb"
         fi
@@ -1148,4 +1148,109 @@ resolveDownloadCheck() {
 
 fetchOTA() {
     python tomboy_lite.py --anti 1 --mode taste $1 $2 | grep downloadCheck
+}
+
+# A pure-64 portrom (no app_process32, empty abilist32) on a vendor that still
+# runs 32-bit HALs - audio, composer, qti.media.c2, media.omx, cas, wfd on kona
+# and lahaina. Ship only what those HALs link against: the 32-bit linker,
+# bionic, and the recursive DT_NEEDED closure of every ELF32 under vendor/ and
+# odm/, taken from the baserom's own system (which still has 32-bit userspace).
+# No 32-bit zygote and no generic compatibility pack.
+inject_vendor32_closure() {
+    local img="${work_dir}/build/portrom/images"
+    local base_sys="${work_dir}/build/baserom/images/system/system"
+    local port_sys="${img}/system/system"
+    local re
+    re=$(command -v readelf || command -v llvm-readelf || command -v aarch64-linux-gnu-readelf)
+    if [[ -z "$re" ]]; then
+        error "readelf not found (run ./willpower.sh), cannot resolve the vendor 32-bit closure"
+        return 1
+    fi
+    if [[ ! -f "${base_sys}/bin/bootstrap/linker" ]] || [[ ! -d "${base_sys}/lib" ]]; then
+        error "baserom system has no 32-bit userspace to take the closure from"
+        return 1
+    fi
+
+    # Libraries the vendor side already ships for itself
+    local -A provided=()
+    local f n src
+    while IFS= read -r f; do
+        provided[$(basename "$f")]=1
+    done < <(find "${img}/vendor/lib" "${img}/odm/lib" -name '*.so' 2>/dev/null)
+
+    # Seed with every 32-bit executable and library on vendor and odm
+    local -a queue=()
+    while IFS= read -r f; do
+        "$re" -h "$f" 2>/dev/null | grep -q 'Class:.*ELF32' && queue+=("$f")
+    done < <(find "${img}/vendor" "${img}/odm" -type f \( -path '*/bin/*' -o -name '*.so' \) 2>/dev/null)
+    blue "vendor32: ${#queue[@]} ELF32 file(s) on vendor/odm"
+
+    mkdir -p "${port_sys}/lib/bootstrap" "${port_sys}/bin/bootstrap"
+    local -A seen=() copied=() missing=()
+    while ((${#queue[@]})); do
+        f=${queue[0]}
+        queue=("${queue[@]:1}")
+        [[ -n ${seen[$f]} ]] && continue
+        seen[$f]=1
+        while IFS= read -r n; do
+            [[ -z "$n" || -n ${provided[$n]} || -n ${copied[$n]} ]] && continue
+            case "$n" in
+                # in system/lib these are symlinks into the runtime apex; the
+                # real 32-bit bionic lives in bootstrap
+                libc.so|libm.so|libdl.so|ld-android.so|libdl_android.so)
+                    src="${base_sys}/lib/bootstrap/${n}" ;;
+                *)
+                    src="${base_sys}/lib/${n}" ;;
+            esac
+            if [[ -f "$src" && ! -L "$src" ]]; then
+                rm -f "${port_sys}/lib/${n}"
+                cp -f "$src" "${port_sys}/lib/${n}"
+                chmod 0644 "${port_sys}/lib/${n}"
+                copied[$n]=1
+                queue+=("$src")
+            else
+                missing[$n]=1
+            fi
+        done < <("$re" -d "$f" 2>/dev/null | grep 'NEEDED' | sed 's/.*\[\(.*\)\].*/\1/')
+    done
+
+    # Bionic for the bootstrap namespace, and the 32-bit linker itself. In a
+    # pure-64 portrom /system/bin/linker points into a runtime apex that has
+    # no 32-bit linker, so every ELF32 PT_INTERP lookup would fail.
+    for n in libc.so libm.so libdl.so ld-android.so libdl_android.so; do
+        if [[ -f "${base_sys}/lib/bootstrap/${n}" ]]; then
+            cp -f "${base_sys}/lib/bootstrap/${n}" "${port_sys}/lib/bootstrap/${n}"
+            chmod 0644 "${port_sys}/lib/bootstrap/${n}"
+        fi
+    done
+    for f in bin/linker bin/bootstrap/linker; do
+        rm -f "${port_sys}/${f}"
+        cp -f "${base_sys}/bin/bootstrap/linker" "${port_sys}/${f}"
+        chmod 0755 "${port_sys}/${f}"
+    done
+
+    # contextpatch.py only guesses labels for entries it is missing; pin the
+    # linkers so they can never end up as plain system_file
+    local fc="${img}/config/system_file_contexts"
+    if [[ -f "$fc" ]]; then
+        for f in '/system/system/bin/linker' '/system/system/bin/bootstrap/linker'; do
+            if grep -q "^${f} " "$fc"; then
+                sed -i "s@^${f} .*@${f} u:object_r:system_linker_exec:s0@" "$fc"
+            else
+                echo "${f} u:object_r:system_linker_exec:s0" >> "$fc"
+            fi
+        done
+    fi
+
+    # 64-bit zygote only; the 32-bit runtime is there for the HALs alone
+    sed -i "s/^ro.vendor.product.cpu.abilist=.*/ro.vendor.product.cpu.abilist=arm64-v8a/" "${img}/vendor/build.prop"
+    sed -i "s/^ro.vendor.product.cpu.abilist32=.*/ro.vendor.product.cpu.abilist32=/" "${img}/vendor/build.prop"
+    for f in $(grep -rl "^ro.zygote=" "${img}/vendor/" 2>/dev/null); do
+        sed -i "s/^ro.zygote=.*/ro.zygote=zygote64/" "$f"
+    done
+
+    : > "${work_dir}/build/portrom/vendor32_missing.txt"
+    for n in "${!missing[@]}"; do echo "$n" >> "${work_dir}/build/portrom/vendor32_missing.txt"; done
+    green "vendor32: copied ${#copied[@]} lib(s) into system/lib, ${#missing[@]} unresolved (build/portrom/vendor32_missing.txt)"
+    return 0
 }
