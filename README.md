@@ -25,10 +25,12 @@ A *Short n' Sweet* toolkit for porting ColorOS and Realme UI to Snapdragon 865, 
 ./willpower.sh
 
 # 2. Espresso in, ColorOS out
-./brina.sh <BASEROM.zip> <PORTROM.zip> [PORTROM2.zip] [PARTITIONS]
+./brina.sh [--Brina] <BASEROM.zip> <PORTROM.zip> [PORTROM2.zip] [PARTITIONS]
 ```
 
 Your flashable zip lands in `out/`. That's that me espresso. ☕
+
+> 🎀 **`--Brina`** puts on the full BrinaOS look — wordmark, OTA card, setup wizard. Leave it off and you get a clean port with the ROM's own branding. *Your call, babe.*
 
 | 🎀 Script | 💋 What it does |
 | :--- | :--- |
@@ -64,7 +66,43 @@ Your flashable zip lands in `out/`. That's that me espresso. ☕
 * **OxygenOS 16:** OnePlus 15 (`16.0.7.201`)
 * **Realme UI 7:** Realme GT 8 Pro (`16.0.5.704`)
 
+---
 
+## 🍒 Android 17 — *Bed Chem, but Make It Boot*
+
+*An Android 11 vendor and an Android 17 system walk into a bar...* 🍸
+
+Android 17 port ROMs on SM8250 / SM8350 vendors are **experimental**. No receipts yet — nobody has posted a tested build. When `brina.sh` sees an Android 17 port ROM, it patches in these fixes on its own:
+
+| 💋 Fix | ☕ Why it matters |
+| :--- | :--- |
+| **SELinux 30.0 mapping** | Old vendor policy and the new system can talk again. Without it, first-stage init gives up. |
+| **ueventd bridge** | Android 17 looks for `/vendor/etc/ueventd.rc`; old vendors keep it at `/vendor/ueventd.rc`. Now they meet in the middle. |
+| **Vendor overlay & `/dev/ion` labels** | Re-applied right before the images are packed, so enforcing mode doesn't get its heart broken. |
+| **qspm `renameat2`** | No more `SIGSYS` heartbreak for `qspmhal`. |
+| **Wi-Fi RRO** | Fixes the radioStats crash. Wi-Fi stays short n' sweet. |
+| **OMAPI / VINTF, NFC, AudioEffectCenter** | Secure element, NFC defaults and the audio effects app all show up for work. |
+| **Perf HAL & display panel sepolicy** | Gated to SM8250 / SM8350, so nobody else gets fixes they don't need. |
+| **HIDL IMS** *(optional)* | Drop `ims-hidl-android17.apk` into `devices/common/` and VoLTE gets a HIDL-friendly IMS. No APK, no change. |
+
+> 🪶 Got a different vendor ABI? Point `PORT_SELINUX_MAP_SOURCE` at your own mapping folder. **Never** rename an Android 17 `31.0.cil` to `30.0.cil` — that's not sweet, that's a bootloop.
+
+---
+
+## 🪶 Feather Engine
+
+*"I feel so much lighter"* — and so does every frame.
+
+SM8250 and SM8350 ports get **Feather** automatically. It tunes SurfaceFlinger, the Adreno GPU, the scheduler, the perf HAL and ART for daily use and gaming. App compiling uses every core, background dexopt stays on the little cluster so it never steals frames, and SystemUI is fully precompiled so the shade and recents stay buttery.
+
+---
+
+## 🔒 Safer Flashing
+
+*Please, please, please don't flash the wrong zip.* 🥺
+
+- **Recovery zip:** before it writes anything, it checks the device and project code, that the package isn't damaged, that every required image and partition is there, and your RAM type (DDR4 / DDR5) so you get the right XBL.
+- **Fastboot scripts:** they stop on a product mismatch, a missing image, or any flash that fails — no half-flashed phones.
 
 ---
 
@@ -83,6 +121,7 @@ Your flashable zip lands in `out/`. That's that me espresso. ☕
 - 🔅 **AOD:** Display is too dim on SM8250 devices.
 - 🎥 **Multimedia:** Video recording is currently broken on 8 Series and 9R.
 - 🔌 **Audio/Power:** Voice triggers, wired earphones, and power-off charging are taking a sick day.
+- 🍒 **Android 17:** Experimental and untested on real hardware. Expect a little nonsense.
 
 ---
 
