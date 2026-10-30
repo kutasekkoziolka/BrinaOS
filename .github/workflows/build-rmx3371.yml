@@ -1,0 +1,164 @@
+name: BrinaOS port RMX3371 (RE54E4L1)
+
+# Build the ColorOS/realmeUI port for the realme GT NEO 3T in GitHub Actions.
+#
+# A standard runner has 14 GB of disk and a full port needs ~45 GB, so:
+#   * `slim_runner` strips the preinstalled SDKs to free ~50 GB,
+#   * `clean_disk` patches brina.sh at run time with two small `rm` hooks (the
+#     zips + extraction cache after unpacking, and each partition tree right
+#     after its .img is built). The fork stays stock: nothing is committed to
+#     brina.sh, the patch is applied by this workflow and fails loudly if the
+#     anchors it looks for are gone (i.e. upstream changed again).
+#
+# The repo must be a fork of ozyern/BrinaOS with devices/RE54E4L1/ committed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base ROM: stock RMX3371 zip (payload.bin)'
+        required: true
+      port_url:
+        description: 'Port ROM: ColorOS 16 / realme UI 7 zip'
+        required: true
+      brina:
+        description: 'BrinaOS branding (--Brina)'
+        type: boolean
+        default: false
+      kernel_url:
+        description: 'Optional: AnyKernel3 zip for --kernel'
+        required: false
+        default: ''
+      slim_runner:
+        description: 'Strip preinstalled SDKs to free disk'
+        type: boolean
+        default: true
+      clean_disk:
+        description: 'Patch brina.sh to delete ROMs/caches as it goes (needed on a free runner)'
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Free disk space
+        if: ${{ inputs.slim_runner }}
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 4096
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - uses: actions/checkout@v4
+
+      - name: Disk space
+        run: |
+          df -h /
+          nproc
+          free -h
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 python3 busybox zip unzip p7zip-full \
+            openjdk-21-jre zstd bc xmlstarlet android-sdk-libsparse-utils binutils
+
+      - name: Device config check
+        run: |
+          # upstream table has a space inside the pattern; harmless for the
+          # device code (RE54E4L1 still matches) but fix it so the model works too
+          sed -i 's/RE54E4L1| RMX3371/RE54E4L1 | RMX3371/' bin/getSuperSize.sh
+          echo "super size: $(bash bin/getSuperSize.sh RE54E4L1)"
+          test -f devices/RE54E4L1/config || { echo "devices/RE54E4L1/config missing"; exit 1; }
+          grep -n "RE54E4L1" devices/RE54E4L1/config | head -3
+
+      - name: Patch brina.sh for CI disk cleanup
+        if: ${{ inputs.clean_disk }}
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          path = 'brina.sh'
+          src = open(path, encoding='utf-8').read()
+
+          # 1) right after the portrom is unpacked (the app_patch_folder block):
+          #    both payloads are on disk, so the zips and the extraction cache
+          #    under build/<version_name>/ are dead weight.
+          anchor_unpack = (
+              'elif [[ -n ${version_name} ]];then\n'
+              '    app_patch_folder=${version_name}\n'
+              'fi\n'
+          )
+          patch_unpack = '\n'.join([
+              '',
+              '# CI_FREE_SPACE: both payloads are unpacked by now, so the two ROM',
+              '# zips and the extraction cache under build/<version_name>/ are dead.',
+              'if [[ "${CI_FREE_SPACE:-false}" == "true" ]]; then',
+              '    blue "CI_FREE_SPACE: dropping the ROM zips and the extraction cache"',
+              '    if [[ "${baserom}" != */* ]]; then rm -f -- "${baserom}"; fi',
+              '    if [[ -z "${portrom2}" ]] && [[ "${portrom}" != */* ]]; then rm -f -- "${portrom}"; fi',
+              '    if [[ -n "${version_name}" ]]; then find "build/${version_name}" -maxdepth 1 -name "*.img" -delete; fi',
+              '    df -h . | tail -n 1',
+              'fi',
+              '',
+          ])
+
+          # 2) in the packing loop: once a partition tree has been packed into
+          #    its .img, the tree itself is dead. my_manifest is kept because
+          #    rom_version is read from its build.prop a few lines later, and the
+          #    whole hook only runs on V-AB (the A-only path re-reads the trees).
+          anchor_pack = '            #rm -rf build/portrom/images/${pname}\n'
+          patch_pack = '\n'.join([
+              '            if [[ "${CI_FREE_SPACE:-false}" == "true" ]] && [[ "${is_ab_device}" == "true" ]] && [[ "${pname}" != "my_manifest" ]]; then',
+              '                rm -rf "build/portrom/images/${pname}"',
+              '            fi',
+              '',
+          ])
+
+          for anchor, label in ((anchor_unpack, 'unpack'), (anchor_pack, 'packing')):
+              n = src.count(anchor)
+              if n != 1:
+                  sys.exit('brina.sh patch: %s anchor found %d times, expected 1 -- '
+                           'upstream changed, refusing to build blind' % (label, n))
+
+          src = src.replace(anchor_unpack, anchor_unpack + patch_unpack, 1)
+          src = src.replace(anchor_pack, patch_pack, 1)
+          open(path, 'w', encoding='utf-8').write(src)
+
+          # sanity: the file must still be valid bash
+          import subprocess
+          subprocess.run(['bash', '-n', path], check=True)
+          print('brina.sh patched for CI disk cleanup')
+          PY
+
+      - name: Build
+        run: |
+          args=""
+          [[ "${{ inputs.brina }}" == "true" ]] && args="--Brina"
+          if [[ -n "${{ inputs.kernel_url }}" ]]; then args="$args --kernel ${{ inputs.kernel_url }}"; fi
+          export CI_FREE_SPACE="${{ inputs.clean_disk }}"
+          echo "brina.sh $args <base> <port>  [CI_FREE_SPACE=${CI_FREE_SPACE}]"
+          ./brina.sh $args "${{ inputs.base_url }}" "${{ inputs.port_url }}"
+
+      - name: What came out
+        if: always()
+        run: |
+          df -h /
+          ls -lh out/ || true
+          find out -maxdepth 3 -type f -size +100M -exec ls -lh {} \; || true
+
+      - name: Upload zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brinaos-rmx3371-${{ github.run_number }}
+          path: out/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error

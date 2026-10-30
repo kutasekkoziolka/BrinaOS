@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# devices/RE54E4L1/config — realme GT NEO 3T (RMX3371)
+#
+# Sourced by brina.sh right after the base and port props have been read and
+# vendor + odm have been taken from the base. Everything brina.sh derived is
+# already in the environment here; whatever this file assigns wins.
+#
+# Values below were read from the real base firmware
+# RMX3371_14.0.0.1310(EX01) — realme UI 5.0 / Android 14, region IN (gdpr):
+#   ro.product.device          = RE54E4L1
+#   ro.product.model           = RMX3371          (realme GT NEO 3T)
+#   ro.board.platform          = kona             (SM8250-AC / Snapdragon 870)
+#   ro.build.device_family     = OPSM8250         (already correct in the base)
+#   ro.build.ab_update         = true             → virtual A/B, NOT A-only
+#   ro.virtual_ab.enabled      = true
+#   vendor fstab               = slotselect + logical (system, system_ext,
+#                                product, vendor, odm, my_product,
+#                                my_engineering, my_company, my_carrier,
+#                                my_region, my_heytap, my_stock, my_preload,
+#                                my_bigball, my_manifest)
+#   ro.sf.lcd_density          = 480 (my_product) / 560 (vendor)
+#   ro.product.first_api_level = 31
+#   ro.oplus.image.my_region.type = IN_all
+#   super partition            = 11274289152 B (measured on the device)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The experimental flag lives in props.sh by convention, but nothing in the
+# toolkit sources that file; read it here so the flag actually exists.
+if [[ -f devices/${base_product_device}/props.sh ]]; then
+    source devices/${base_product_device}/props.sh
+fi
+
+if [[ "${base_product_device}" != "RE54E4L1" ]]; then
+    yellow "devices/RE54E4L1/config: base product device is '${base_product_device}', not 'RE54E4L1' -- this config is for a realme GT NEO 3T base, skipping its overrides"
+else
+
+    # ── Device family ────────────────────────────────────────────────────────
+    # The stock RMX3371 base already reports ro.build.device_family=OPSM8250, so
+    # this is only a safety net: brina.sh maps a realme base from
+    # ro.board.platform, and if a base still ends up with a RE* family code every
+    # SM8250 fix (face unlock, RIL/subsys radio, AON, camera optimize, battery
+    # health, Feather Engine) would silently be skipped.
+    if [[ "${base_device_family}" != "OPSM8250" ]] && [[ "${base_device_family}" != "OPSM8350" ]]; then
+        yellow "RE54E4L1: ro.build.device_family='${base_device_family}' -- forcing OPSM8250 (kona / SM8250-AC)"
+        base_device_family="OPSM8250"
+    fi
+
+    # ── Sanity report ────────────────────────────────────────────────────────
+    green "RE54E4L1: family=${base_device_family} ab_update=${is_ab_device} first_api=${base_product_first_api_level} base_android=${base_android_version} market='${base_market_name}'"
+    green "RE54E4L1: base build ${base_rom_version} / ${target_display_id:+port display ${target_display_id}}"
+
+    if [[ "${base_android_version}" != "14" ]]; then
+        yellow "RE54E4L1: base is Android ${base_android_version}; the toolkit is written against a 14 base (realme UI 5.0). A 13 or 15 base works, but the SM8250 fixes are gated on it -- see the base_android_version checks in brina.sh."
+    fi
+
+    # ── A/B or A-only ────────────────────────────────────────────────────────
+    # is_ab_device is read from the base vendor partition (vendor is never
+    # ported), and the stock RMX3371 vendor says ro.build.ab_update=true with
+    # ro.virtual_ab.enabled=true -- the device is virtual A/B, its fstab carries
+    # slotselect and ro.product.ab_ota_partitions is populated. So the packaging
+    # must take the V-AB branch; the A-only assets in this folder (recovery.fstab,
+    # releasetools.py, OTA/bin/updater) are not used on this base and are kept
+    # only as a fallback.
+    if [[ "${is_ab_device}" == "true" ]]; then
+        blue "RE54E4L1: virtual A/B base (ro.build.ab_update=true) -- packing a V-AB super, A-only OTA assets unused"
+    else
+        yellow "RE54E4L1: base reports ro.build.ab_update=false -- the stock RMX3371 is virtual A/B, so this base is probably not an RMX3371 firmware. Packaging will take the A-only path and use the OTA assets in this folder."
+    fi
+
+    # ── Density ──────────────────────────────────────────────────────────────
+    # Two values ship in the base: my_product says 480, vendor says 560. brina.sh
+    # takes the my_product one (and that is what the stock ROM runs at), so only
+    # report the pair -- a mismatch here means the port will not look like stock.
+    _mp_density=$(grep -m1 "^ro.sf.lcd_density=" build/baserom/images/my_product/build.prop 2>/dev/null | cut -d '=' -f 2 | tr -d '\r')
+    _vnd_density=$(grep -m1 "^ro.sf.lcd_density=" build/portrom/images/vendor/build.prop 2>/dev/null | cut -d '=' -f 2 | tr -d '\r')
+    blue "RE54E4L1: density my_product=${_mp_density:-?} vendor=${_vnd_density:-?} (brina.sh uses my_product)"
+    if [[ -n "${_mp_density}" ]] && [[ "${_mp_density}" != "480" ]];then
+        yellow "RE54E4L1: stock density is 480, base says ${_mp_density} -- check that this is really an RMX3371 base"
+    fi
+    unset _mp_density _vnd_density
+
+    # ── Region ───────────────────────────────────────────────────────────────
+    # EX01 is the Indian/global build (my_region.type=IN_all, pipeline_key=IN).
+    # brina.sh forces the portrom's regionmark to the baserom's, so a ColorOS
+    # port from another region gets IN radio/carrier config -- which is what the
+    # modem in this phone expects.
+    _base_region=$(grep -m1 "^ro.oplus.image.my_region.type=" build/baserom/images/my_manifest/build.prop 2>/dev/null | cut -d '=' -f 2 | tr -d '\r')
+    blue "RE54E4L1: base region '${_base_region:-?}' (portrom regionmark will follow it)"
+    unset _base_region
+
+    # ── super size ───────────────────────────────────────────────────────────
+    # brina.sh reads the size from bin/getSuperSize.sh much later, so assigning
+    # superSize here would only be overwritten. The table already carries the
+    # right value for this device, measured on the phone on top of the AOSP ROM
+    # (so it is the partition table talking, not the running ROM):
+    #   blockdev --getsize64 /dev/block/*/super   -> 11274289152
+    # The variable below is therefore documentation, not a switch: stock
+    # brina.sh does not read device_super_size. If you ever need to override the
+    # size, change the RE54E4L1 line in bin/getSuperSize.sh instead.
+    device_super_size=11274289152
+
+    _table_super=$(bash bin/getSuperSize.sh "${base_product_device}" 2>/dev/null)
+    _base_fstab="build/portrom/images/vendor/etc/fstab.qcom"
+    [[ -f "${_base_fstab}" ]] || _base_fstab="build/baserom/images/vendor/etc/fstab.qcom"
+    if [[ -f "${_base_fstab}" ]];then
+        _dyn_parts=$(awk '!/^#/ && /logical/ {print $1}' "${_base_fstab}" | sort -u | tr '\n' ' ')
+        blue "RE54E4L1: super=${_table_super} B, logical partitions in base: ${_dyn_parts:-none}"
+        if ! grep -qw "my_stock" <<< "${_dyn_parts}";then
+            yellow "RE54E4L1: base fstab has no my_stock -- check the base, the stock RMX3371 has one"
+        fi
+        unset _dyn_parts
+    else
+        yellow "RE54E4L1: no vendor/etc/fstab.qcom in the base -- cannot list the logical partitions"
+    fi
+    unset _table_super _base_fstab
+
+    # ── Device-specific tweaks ───────────────────────────────────────────────
+    # Nothing is forced here: the RMX3371 base is a plain SM8250-AC V-AB OPlus
+    # device, every fix it needs is keyed on OPSM8250, and vendor + odm are taken
+    # from the base unchanged (so the camera, display, audio and thermal stacks
+    # are the stock realme ones, not the donor's). Prefer
+    # devices/RE54E4L1/overlay/ for whole files over sed here.
+
+fi
