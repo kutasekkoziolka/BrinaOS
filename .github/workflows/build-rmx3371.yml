@@ -143,8 +143,10 @@ jobs:
           [[ "${{ inputs.brina }}" == "true" ]] && args="--Brina"
           if [[ -n "${{ inputs.kernel_url }}" ]]; then args="$args --kernel ${{ inputs.kernel_url }}"; fi
           export CI_FREE_SPACE="${{ inputs.clean_disk }}"
+          chmod +x ./brina.sh || true
+          ls -l ./brina.sh
           echo "brina.sh $args <base> <port>  [CI_FREE_SPACE=${CI_FREE_SPACE}]"
-          ./brina.sh $args "${{ inputs.base_url }}" "${{ inputs.port_url }}"
+          bash ./brina.sh $args "${{ inputs.base_url }}" "${{ inputs.port_url }}"
 
       - name: What came out
         if: always()
