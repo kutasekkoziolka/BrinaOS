@@ -4,11 +4,15 @@ name: BrinaOS port RMX3371 (RE54E4L1)
 #
 # A standard runner has 14 GB of disk and a full port needs ~45 GB, so:
 #   * `slim_runner` strips the preinstalled SDKs to free ~50 GB,
-#   * `clean_disk` patches brina.sh at run time with two small `rm` hooks (the
-#     zips + extraction cache after unpacking, and each partition tree right
-#     after its .img is built). The fork stays stock: nothing is committed to
-#     brina.sh, the patch is applied by this workflow and fails loudly if the
-#     anchors it looks for are gone (i.e. upstream changed again).
+#   * `clean_disk` patches brina.sh at run time with four small `rm` hooks (see
+#     below). The fork stays stock: nothing is committed to brina.sh, the patch
+#     is applied by this workflow and fails loudly if the anchors it looks for
+#     are gone (i.e. upstream changed again).
+#
+# The output is the fastboot package (super.zst + flash scripts), not the
+# recovery OTA zip: `bin/port_config` is switched to `pack_method=fastboot`,
+# because that path only needs the per-partition .img files, while the stock
+# path re-reads the unpacked trees for build.prop after the hooks deleted them.
 #
 # The repo must be a fork of ozyern/BrinaOS with devices/RE54E4L1/ committed.
 
@@ -18,9 +22,11 @@ on:
       base_url:
         description: 'Base ROM: stock RMX3371 zip (payload.bin)'
         required: true
+        default: 'https://gauss-componentotamanual.allawnofs.com/remove-c9b0beca36edeeb4eb40c2969ec9cc8c/component-ota/24/11/23/40826e399d964511b16fb8a1c7dabc71.zip'
       port_url:
-        description: 'Port ROM: ColorOS 16 / realme UI 7 zip'
+        description: 'Port ROM: ColorOS 16 / realme UI 7 zip (signed, expires -- paste a fresh one)'
         required: true
+        default: 'https://component-ota-cn.allawntech.com/downloadCheck?c=a99b4631a38a4bf231e2e712dee6d537&p=a6c78fdd375d888b38ce89ab47ce36679625aeb44e3454f0d7ed03b0c22900c4ecba60dbe72b3274ba3cd3282179&d=e181cd82745f88956e8098ec0182623bca30a2a51b7b03ead6e04ce9ca7400d5b4e921c5b4276d&g=10eab6008d5642cf42abd2aa41f847cb&id=6a7b2fc876d168017f1d7d73&taste=1&supportDLTaste=0&mode=1&tr=manual&s=e0b89912ac6bbc64fc39938a86ae9fe1'
       brina:
         description: 'BrinaOS branding (--Brina)'
         type: boolean
@@ -71,6 +77,11 @@ jobs:
 
       - name: Device config check
         run: |
+          # the exec bit is easy to lose when the file is edited or uploaded
+          # through the web UI, and then "./brina.sh" dies with Permission denied
+          chmod +x brina.sh bin/*.sh 2>/dev/null || true
+          ls -l brina.sh
+
           # upstream table has a space inside the pattern; harmless for the
           # device code (RE54E4L1 still matches) but fix it so the model works too
           sed -i 's/RE54E4L1| RMX3371/RE54E4L1 | RMX3371/' bin/getSuperSize.sh
@@ -78,18 +89,32 @@ jobs:
           test -f devices/RE54E4L1/config || { echo "devices/RE54E4L1/config missing"; exit 1; }
           grep -n "RE54E4L1" devices/RE54E4L1/config | head -3
 
+          # fastboot package (super.zst + flash scripts) instead of the recovery
+          # OTA zip; the flash scripts need nothing but fastboot on a PC
+          sed -i 's/^pack_method=.*/pack_method=fastboot/' bin/port_config
+          grep -n '^pack_method=' bin/port_config
+
+          # super.zst is already compressed, so store it in the zip instead of
+          # spending 15 minutes deflating 10 GB for nothing
+          if sed -i 's|zip -r ${os_type}_${rom_version}\.zip|zip -0 -r ${os_type}_${rom_version}.zip|' brina.sh \
+             && grep -q 'zip -0 -r ${os_type}' brina.sh; then
+            echo "zip: storing (no deflate)"
+          else
+            echo "zip: upstream changed the zip line, leaving it as it is"
+          fi
+
       - name: Patch brina.sh for CI disk cleanup
         if: ${{ inputs.clean_disk }}
         run: |
           python3 - <<'PY'
           import sys
+          import subprocess
 
           path = 'brina.sh'
           src = open(path, encoding='utf-8').read()
 
-          # 1) right after the portrom is unpacked (the app_patch_folder block):
-          #    both payloads are on disk, so the zips and the extraction cache
-          #    under build/<version_name>/ are dead weight.
+          # 1) right after the portrom is unpacked: both payloads are on disk,
+          #    so the zips and the extraction cache are dead weight.
           anchor_unpack = (
               'elif [[ -n ${version_name} ]];then\n'
               '    app_patch_folder=${version_name}\n'
@@ -109,19 +134,48 @@ jobs:
               '',
           ])
 
-          # 2) in the packing loop: once a partition tree has been packed into
-          #    its .img, the tree itself is dead. my_manifest is kept because
-          #    rom_version is read from its build.prop a few lines later, and the
-          #    whole hook only runs on V-AB (the A-only path re-reads the trees).
+          # 2) in the packing loop: once a partition tree has been packed into its
+          #    .img the tree is dead. build.prop is kept because the OTA step
+          #    (pack_method=stock) reads it out of the tree. V-AB only, the A-only
+          #    path re-reads the trees.
           anchor_pack = '            #rm -rf build/portrom/images/${pname}\n'
           patch_pack = '\n'.join([
               '            if [[ "${CI_FREE_SPACE:-false}" == "true" ]] && [[ "${is_ab_device}" == "true" ]] && [[ "${pname}" != "my_manifest" ]]; then',
-              '                rm -rf "build/portrom/images/${pname}"',
+              '                ci_tree="build/portrom/images/${pname}"',
+              '                ci_prop=$(find "$ci_tree" -type f -name build.prop -not -path "*/system_dlkm/*" -not -path "*/odm_dlkm/*" -print -quit)',
+              '                if [[ -n "$ci_prop" ]]; then cp -f "$ci_prop" "$ci_tree/build.prop"; fi',
+              '                find "$ci_tree" -mindepth 1 -maxdepth 1 ! -name build.prop -exec rm -rf {} +',
               '            fi',
               '',
           ])
 
-          for anchor, label in ((anchor_unpack, 'unpack'), (anchor_pack, 'packing')):
+          # 3) after the packing loop only the base .img files are still needed
+          #    (plus firmware-update / storage-fw / ffu_tool), not the trees.
+          anchor_base = 'rm fstype.txt\n'
+          patch_base = '\n'.join([
+              'if [[ "${CI_FREE_SPACE:-false}" == "true" ]]; then',
+              '    blue "CI_FREE_SPACE: dropping the base ROM partition trees"',
+              '    find build/baserom/images -mindepth 1 -maxdepth 1 ! -name "*.img" -exec rm -rf {} +',
+              '    df -h . | tail -n 1',
+              'fi',
+              '',
+          ])
+
+          # 4) super.img is dead once super.zst exists, and so are the partition
+          #    images lpmake already folded into it.
+          anchor_super = '    zstd build/portrom/images/super.img -o build/portrom/super.zst\n'
+          patch_super = '\n'.join([
+              '    if [[ "${CI_FREE_SPACE:-false}" == "true" ]]; then',
+              '        blue "CI_FREE_SPACE: dropping super.img and the packed partition images"',
+              '        rm -f build/portrom/images/super.img',
+              '        for pname in ${super_list}; do rm -f "build/portrom/images/${pname}.img"; done',
+              '        df -h . | tail -n 1',
+              '    fi',
+              '',
+          ])
+
+          for anchor, label in ((anchor_unpack, 'unpack'), (anchor_pack, 'packing'),
+                                (anchor_base, 'base trees'), (anchor_super, 'super.zst')):
               n = src.count(anchor)
               if n != 1:
                   sys.exit('brina.sh patch: %s anchor found %d times, expected 1 -- '
@@ -129,10 +183,10 @@ jobs:
 
           src = src.replace(anchor_unpack, anchor_unpack + patch_unpack, 1)
           src = src.replace(anchor_pack, patch_pack, 1)
+          src = src.replace(anchor_base, anchor_base + patch_base, 1)
+          src = src.replace(anchor_super, anchor_super + patch_super, 1)
           open(path, 'w', encoding='utf-8').write(src)
 
-          # sanity: the file must still be valid bash
-          import subprocess
           subprocess.run(['bash', '-n', path], check=True)
           print('brina.sh patched for CI disk cleanup')
           PY
@@ -143,8 +197,6 @@ jobs:
           [[ "${{ inputs.brina }}" == "true" ]] && args="--Brina"
           if [[ -n "${{ inputs.kernel_url }}" ]]; then args="$args --kernel ${{ inputs.kernel_url }}"; fi
           export CI_FREE_SPACE="${{ inputs.clean_disk }}"
-          chmod +x ./brina.sh || true
-          ls -l ./brina.sh
           echo "brina.sh $args <base> <port>  [CI_FREE_SPACE=${CI_FREE_SPACE}]"
           bash ./brina.sh $args "${{ inputs.base_url }}" "${{ inputs.port_url }}"
 
@@ -164,3 +216,4 @@ jobs:
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
+          
