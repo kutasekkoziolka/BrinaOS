@@ -1,5 +1,6 @@
 #!/bin/bash
 # Rebuilds devices/common/bootanimation.zip and rbootanimation.zip.
+# First impressions are short n' sweet -- this is the one they see on every boot.
 # Run from the toolkit root:  bash devices/common/tools/mkboot.sh [crest.png]
 set -e
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)

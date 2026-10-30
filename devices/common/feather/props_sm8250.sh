@@ -1,4 +1,5 @@
 # Feather Engine — SM8250 (Snapdragon 865 / Adreno 650) specific props
+# Short n' sweet: the 865 already has the legs, these just let it dance.
 
 apply_sm8250_props() {
     local sys="$1" vnd="$2"

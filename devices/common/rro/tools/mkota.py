@@ -114,7 +114,7 @@ def main():
 
         print('  %s: %d locale(s)' % (name, len(locales)))
 
-    print('wrote %d string overrides to %s' % (total, RRO_RES))
+    print('wrote %d string overrides to %s -- espresso-fresh' % (total, RRO_RES))
 
 
 main()

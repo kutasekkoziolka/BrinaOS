@@ -25,11 +25,11 @@ elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	read -p "請選擇(默認選擇1,回車執行):" input
 else
 	echo
-	echo 1.Reserved data
+	echo "1. Keep your data   (nonsense-free dirty flash)"
 	echo
-	echo 2.Wipe data
+	echo "2. Wipe data        (a clean slate, like it never happened)"
 	echo
-	read -p "Please select(1 is selected by default, and enter to execute):" input
+	read -p "Pick one, babe (Enter = 1): " input
 fi
 pdapt=$(command -v apt | grep "apt")
 if [ -n "$pdapt" ];then
@@ -50,7 +50,7 @@ else
 	elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	    echo fastboot已安裝
 	else
-	    echo fastboot already installed
+	    echo "fastboot is already here - feather light, let us go"
   fi
 fi
 
@@ -74,7 +74,7 @@ else
 	elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	    echo zstd已安裝
 	else
-	    echo zstd already installed
+	    echo "zstd is already here"
 	fi
 fi
  
@@ -86,7 +86,7 @@ if [ -f "super.zst" ];then
 	elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	    echo 正在解壓super鏡像，耐心等待
 	else
-	    echo Extracting the super image, wait patiently
+	    echo "Unpacking super.img... grab an espresso, this takes a sec"
 	fi
 	zstd --rm -d super.zst -o super.img
 	if [ $? -ne 0 ]; then
@@ -97,14 +97,14 @@ if [ -f "super.zst" ];then
 		elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 		    echo 轉換失敗，2s後退出程式
 		else
-		    echo Conversion failed, exit the program after 2s
+		    echo "Conversion failed - that is not sweet. Exiting in 2s"
 		fi
 		exit 1
 	fi
 fi
 
 if [ ! -f "super.img" ]; then
-	echo "Required super.img is missing."
+	echo "super.img is missing. Taste - it is not in the package."
 	exit 1
 fi
 
@@ -115,7 +115,7 @@ elif [ "$LANG" = "zh_CN.UTF-8" ];then
 elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	echo "機型驗證中...請確保您的設備代號為device_code，並已進入bootloader模式。"
 else
-	echo "Validating device...please boot your device into bootloader and make sure your device code is device_code"
+	echo "Checking the device... boot into bootloader and make sure it is device_code"
 fi
 
 if ! device_info="$(fastboot "$@" getvar product 2>&1)"; then
@@ -130,19 +130,19 @@ if [ "$device_product" != "device_code" ]; then
 		elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 		    echo 機型device_code校驗失敗，檢查包是否匹配
 		else
-		    echo "Mismatching image and device device_code"
+		    echo "Wrong phone, wrong package - this build is only for device_code. Bed chem denied."
 		fi
 	exit 1 
 fi
 
 if [ -f "boot_tv.img" ]; then
 	if [ ! -f "firmware-update/dtbo_tv.img" ]; then
-		echo "Required custom dtbo image is missing."
+		echo "Custom dtbo image is missing - cannot flash the custom kernel."
 		exit 1
 	fi
 else
 	if [ ! -f "boot_official.img" ] || [ ! -f "firmware-update/dtbo.img" ]; then
-		echo "Required official boot or dtbo image is missing."
+		echo "Stock boot or dtbo image is missing - nothing to flash."
 		exit 1
 	fi
 fi
@@ -162,7 +162,7 @@ if [ -f "boot_tv.img" ]; then
 		elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 		    echo 刷入第三方内核中...
 		else
-		    echo "Flahsing boot_tv.img"
+		    echo "Flashing the custom kernel..."
 		fi
 	fastboot flash boot_a boot_tv.img
 	fastboot flash boot_b boot_tv.img
@@ -176,7 +176,7 @@ else
 		elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 		    echo 刷入官方内核中...
 		else
-		    echo "Flahsing boot_offcial.img"
+		    echo "Flashing the stock kernel..."
 		fi
 	fastboot flash boot_a boot_official.img
 	fastboot flash boot_b boot_official.img
@@ -194,7 +194,7 @@ elif [ "$input" -eq "2" ];then
 	elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	    echo 正在雙清系統，耐心等待
 	else
-	    echo Wiping data, please wait patiently
+	    echo "Wiping data... out with the old, please wait"
 	fi
 	fastboot erase userdata
 	fastboot erase metadata
@@ -209,7 +209,7 @@ elif [ "$LANG" = "zh_CN.UTF-8" ];then
 elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	echo 開始將活動分區設置為 'a'。這可能需要一些時間。請勿手動重新啟動或拔掉數據線，否則可能導致設備無法響應。
 else
-	echo Starting the process to set the active slot to 'a.' This may take some time. Please refrain from manually restarting or unplugging the data cable, as doing so could result in the device becoming unresponsive.
+	echo "Setting slot A active. Please, please, please do not reboot or unplug the cable - it could brick the phone."
 fi
 fastboot set_active a
 # SET_ACTION_SLOT_A_END
@@ -223,7 +223,7 @@ elif [ "$LANG" = "zh_CN.UTF-8" ];then
 elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 	echo 刷機完成，若手機長時間未重啓請手動重啓，按任意鍵退出
 else
-	echo Flash completed. If the phone does not restart for an extended period, please manually restart. Press any key to exit.
+	echo "All done - that is that me espresso. If the phone does not reboot on its own after a while, reboot it manually."
 fi
 echo 若手机长时间未重启请手动重启
 exit 0

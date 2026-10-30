@@ -1,6 +1,7 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Feather Engine — SM8250 / SM8350 smoothness & performance tuning
+# "I feel so much lighter" -- every frame should, too.
 # Injects SurfaceFlinger, Dalvik, GPU, scheduler, and perf HAL properties
 # into the ported ROM. Also installs device-specific init.rc files.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ patch_thermal_config() {
         sed -i "s/set_point_clr ${orig}/set_point_clr ${thermal_map[$orig]}/g" "$conf"
     done
 
-    blue "Feather: thermal thresholds relaxed" 2>/dev/null || true
+    blue "Feather: thermals relaxed -- it's getting hot in here, but not too hot" 2>/dev/null || true
 }
 
 # ── 12GB RAM variant overrides ──────────────────────────────────────────────
@@ -94,11 +95,11 @@ apply_feather_engine() {
 
     # Gate: required files
     if [[ ! -f "$SYSTEM_PATH/build.prop" || ! -f "$VENDOR_PATH/default.prop" ]]; then
-        yellow "Feather Engine skipped: required prop files not found" 2>/dev/null || true
+        yellow "Feather Engine skipped: prop files not found -- can't float without them" 2>/dev/null || true
         return 0
     fi
 
-    blue "Implementing Feather Engine ($family)..." 2>/dev/null || true
+    blue "Feather Engine taking flight ($family)... light as a feather" 2>/dev/null || true
 
     # ── Device variant detection ─────────────────────────────────────────────
     local is_op9pro=false is_op8pro=false is_op8t=false is_op9r_8250=false
@@ -171,12 +172,12 @@ apply_feather_engine() {
 
     # ── 12GB RAM overrides ───────────────────────────────────────────────────
     if [[ "$is_12gb" == true ]]; then
-        blue "Feather: 12GB RAM profile applied (${model})" 2>/dev/null || true
+        blue "Feather: 12GB RAM profile applied (${model}) -- plenty of room for nonsense" 2>/dev/null || true
         apply_12gb_overrides "$SYSTEM_PATH" "$VENDOR_PATH"
     fi
 
     # ── Thermal config patching ──────────────────────────────────────────────
     patch_thermal_config "$VENDOR_PATH"
 
-    green "Feather Engine applied successfully" 2>/dev/null || true
+    green "Feather Engine applied -- you're feather light, babe" 2>/dev/null || true
 }

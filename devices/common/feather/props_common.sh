@@ -1,4 +1,4 @@
-# Feather Engine — shared props (SM8250 + SM8350)
+# Feather Engine — shared props (SM8250 + SM8350). Light as a feather, sweet as espresso.
 # Each function writes to system build.prop or vendor default.prop.
 # Caller must define set_prop() before sourcing this file.
 
@@ -46,6 +46,12 @@ apply_dalvik_props() {
     set_prop "$sys/build.prop"  "dalvik.vm.dex2oat-threads=8"
     set_prop "$sys/build.prop"  "dalvik.vm.dex2oat-cpu-set=0,1,2,3,4,5,6,7"
     set_prop "$sys/build.prop"  "dalvik.vm.dex2oat-swap=false"
+    # Background dexopt stays on the little cluster so it never steals frames
+    # from the foreground app or game
+    set_prop "$sys/build.prop"  "dalvik.vm.background-dex2oat-cpu-set=0,1,2,3"
+    set_prop "$sys/build.prop"  "dalvik.vm.background-dex2oat-threads=4"
+    # SystemUI fully AOT-compiled: shade, QS and recents never hit the JIT
+    set_prop "$sys/build.prop"  "dalvik.vm.systemuicompilerfilter=speed"
     # JIT threshold: hot methods promote to AOT faster
     set_prop "$sys/build.prop"  "dalvik.vm.jitthreshold=500"
     set_prop "$sys/build.prop"  "dalvik.vm.jitinitialsize=64m"

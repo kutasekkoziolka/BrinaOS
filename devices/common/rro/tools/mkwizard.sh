@@ -1,5 +1,6 @@
 #!/bin/bash
 # Regenerates the BrinaOSSetupWizard artwork. Run from the toolkit root.
+# "Hello, it's nice to meet you" -- the very first screen should feel like it.
 set -e
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"

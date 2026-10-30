@@ -1,4 +1,5 @@
 # Feather Engine — SM8350 (Snapdragon 888 / Adreno 660) specific props
+# The 888 runs hot -- "Feather" keeps it cool, calm and buttery.
 
 apply_sm8350_props() {
     local sys="$1" vnd="$2"

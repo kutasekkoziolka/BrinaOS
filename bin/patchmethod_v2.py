@@ -10,7 +10,7 @@ def replace_method_body(smali_path, method_name, new_body):
     match = re.search(pattern, content, re.DOTALL)
 
     if not match:
-        print(f"----> Method '{method_name}' not found in {smali_path}")
+        print(f"💅 Method '{method_name}' not found in {smali_path}")
         return
 
     start = match.group(1)
@@ -22,7 +22,7 @@ def replace_method_body(smali_path, method_name, new_body):
     with open(smali_path, 'w') as f:
         f.write(content)
 
-    print(f"----> Replaced body of method '{method_name}' in: {smali_path}")
+    print(f"💅 Replaced body of method '{method_name}' in: {smali_path}")
 
 
 STUB_METHOD = '''\
@@ -38,7 +38,7 @@ STUB_VOID = '''\
 
 def patch_method_in_file(smali_path, method_set, return_type="true"):
     if not os.path.isfile(smali_path):
-        print(f"----> Ignore patch: \"{os.path.basename(smali_path)}\" not found")
+        print(f"💅 Ignore patch: \"{os.path.basename(smali_path)}\" not found")
         return
 
     with open(smali_path, 'r') as f:
@@ -70,10 +70,10 @@ def patch_method_in_file(smali_path, method_set, return_type="true"):
                 overwriting = False
                 if overvalue == '-1':
                     patched += STUB_VOID + line + '\n'
-                    print(f"----> patched method in {smali_path}: {method_name} => void")
+                    print(f"💅 patched method in {smali_path}: {method_name} => void")
                 else:
                     patched += (STUB_METHOD % overvalue) + line + '\n'
-                    print(f"----> patched method in {smali_path}: {method_name} => " + ('true' if overvalue == '1' else 'false'))
+                    print(f"💅 patched method in {smali_path}: {method_name} => " + ('true' if overvalue == '1' else 'false'))
             else:
                 patched += line + '\n'
         else:
@@ -127,7 +127,7 @@ def search_and_hook(smali_dir, keyword_pattern, hook_line_template):
             if modified:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.writelines(new_lines)
-                print(f"----> Patched {path}")
+                print(f"💅 Patched {path}")
 
 
 

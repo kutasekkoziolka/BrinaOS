@@ -121,9 +121,12 @@ fi
 
 ui_print " "
 ui_print "****************************"
+ui_print "     short n' sweet flash"
+ui_print "****************************"
 ui_print "Device: device_code"
 ui_print "Region: REGIONMARK"
 ui_print " "
+ui_print "Espresso is brewing, firmware first..."
 ui_print "Updating modem..."
 package_extract_file "firmware-update/modem.img" "/dev/block/bootdevice/by-name/modem_a"
 package_extract_file "firmware-update/modem.img" "/dev/block/bootdevice/by-name/modem_b"
@@ -207,7 +210,7 @@ else
   package_extract_file "firmware-update/xbl_config.img" "/dev/block/bootdevice/by-name/xbl_config_b"
 fi
 
-ui_print "Disabing AVB2.0..."
+ui_print "Disabling AVB2.0... no bed chem with verity tonight"
 package_extract_file "firmware-update/vbmeta_system.img" "/dev/block/bootdevice/by-name/vbmeta_system_a"
 package_extract_file "firmware-update/vbmeta_system.img" "/dev/block/bootdevice/by-name/vbmeta_system_b"
 package_extract_file "firmware-update/vbmeta.img" "/dev/block/bootdevice/by-name/vbmeta_a"
@@ -233,6 +236,7 @@ fi
 
 
 
+ui_print "Flashing super... please, please, please do not pull the cable"
 #super image
 package_extract_zstd "super.zst" "/dev/block/bootdevice/by-name/super"
 
@@ -254,14 +258,14 @@ rm -rf /data/dalvik-cache/arm/*
 rm -rf /data/dalvik-cache/arm64/*
 rm -rf /data/system/package_cache/*
 ui_print " "
-ui_print " "
+ui_print "Done. That is that me espresso."
 #ui_print "- 刷机完毕"
 ui_print " "
 ui_print " "
 #ui_print "- 如有红色挂载报错请直接忽略"
 #ui_print "- 如有红色挂载报错请直接忽略"
 #ui_print "- 如有红色挂载报错请直接忽略"
-ui_print " "
+ui_print "Red mount errors above are harmless - ignore them, babe."
 ui_print " "
 
 exit 0

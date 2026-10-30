@@ -19,7 +19,7 @@ cd "$ROOT"
 # key-visual drawables.
 OTA=build/portrom/images/system_ext/app/OTA/OTA.apk
 [[ -f "$OTA" ]] || OTA=$(find build -type f -path "*system_ext/app/OTA/OTA.apk" 2>/dev/null | head -n1)
-if [[ -z "$OTA" || ! -f "$OTA" ]]; then echo "mkkv: stock OTA.apk not found in build/, run after unpack"; exit 1; fi
+if [[ -z "$OTA" || ! -f "$OTA" ]]; then echo "mkkv: stock OTA.apk not found in build/ -- run after unpack, babe"; exit 1; fi
 
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 java -jar bin/apktool/apktool.jar d -f -o "$W/ota" "$OTA" >/dev/null 2>&1
@@ -36,4 +36,4 @@ java devices/common/rro/tools/KvNum.java "$STOCK" 16   345 300 "$DRW/kv_16.png"
 # reconstructed "16.1": the ".1" glyph never reads as cleanly and the plain "16"
 # is the look the device owner signed off on. So kv_16_1 is just a copy of kv_16.
 cp -f "$DRW/kv_16.png" "$DRW/kv_16_1.png"
-echo "mkkv: wrote $DRW/kv_16.png and kv_16_1.png (both the gold 16)"
+echo "mkkv: wrote $DRW/kv_16.png and kv_16_1.png (both the gold 16) -- sweet"

@@ -147,7 +147,7 @@ def main():
         run('java', '-jar', APKTOOL, 'b', src, '-o', unsigned)
         run(APKSIGNER, 'sign', '--key', KEY, '--cert', CERT,
             '--v4-signing-enabled', 'false', '--out', APK, unsigned)
-        print('%s rewritten, %d bytes' % (APK, os.path.getsize(APK)))
+        print('%s rewritten, %d bytes -- signal bars looking sweet' % (APK, os.path.getsize(APK)))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

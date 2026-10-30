@@ -1777,25 +1777,6 @@ if [[ $port_android_version -lt 16 ]];then
         add_prop_v2 "persist.sys.oplus.anim_level" "1"
     fi
 fi
-
-# SM8250 / SM8350 (865/870/888) daily-use and gaming smoothness. Both kona and
-# lahaina are 4 little (0-3) + 3 big (4-6) + 1 prime (7).
-if [[ $base_device_family == "OPSM8250" ]] || [[ $base_device_family == "OPSM8350" ]];then
-    blue "Tuning ART for SM8250/SM8350 smoothness"
-    # Installs and updates the user is waiting on compile on the big cores;
-    # background dexopt stays on the little cluster so it never steals frames
-    # from the foreground app or game.
-    add_prop_v2 "dalvik.vm.dex2oat-cpu-set" "4,5,6,7"
-    add_prop_v2 "dalvik.vm.dex2oat-threads" "4"
-    add_prop_v2 "dalvik.vm.background-dex2oat-cpu-set" "0,1,2,3"
-    add_prop_v2 "dalvik.vm.background-dex2oat-threads" "4"
-    # First boot after flashing is the one time every core can be spent on dexopt.
-    add_prop_v2 "dalvik.vm.boot-dex2oat-cpu-set" "0,1,2,3,4,5,6,7"
-    add_prop_v2 "dalvik.vm.boot-dex2oat-threads" "8"
-    # Fully AOT-compile SystemUI so the shade, QS and recents never fall back to
-    # the interpreter/JIT after an update.
-    add_prop_v2 "dalvik.vm.systemuicompilerfilter" "speed"
-fi
 add_prop_v2 "ro.sf.lcd_density" "${base_rom_density}"
 
 cp -rf build/baserom/images/my_product/app/com.oplus.vulkanLayer build/portrom/images/my_product/app/
@@ -2474,7 +2455,7 @@ a17_patch_vendor_context_file() {
 #    Wi-Fi RRO, avoiding the radioStats NPE.
 # 5. Label vendor overlays and /dev/ion for enforcing-mode Android 17 policy.
 if [[ ${port_android_version} == 17 ]];then
-    blue "Android 17 compatibility fixes"
+    sparkle "🍒  Android 17 on a legacy vendor -- bed chem, but make it boot"
     mkdir -p build/diagnostics/a17-compat/originals
 
     # SELinux 30.0 mapping: only copy from trusted assets, never rename the
@@ -2505,7 +2486,7 @@ if [[ ${port_android_version} == 17 ]];then
             fi
             [[ -f "${target_map_file}" ]] && cp -p "${target_map_file}" "build/diagnostics/a17-compat/originals/${map_part}-${map_file}"
             cp -p "${source_map_file}" "${target_map_file}"
-            green "Installed ${map_part}/${map_file}"
+            green "Installed ${map_part}/${map_file} -- SELinux and the old vendor are talking again"
         done
     done
 
@@ -2545,7 +2526,7 @@ if [[ ${port_android_version} == 17 ]];then
                 error "Failed to install vendor ueventd compatibility bridge"
                 exit 1
             fi
-            green "Added vendor/etc/ueventd.rc -> /vendor/ueventd.rc compatibility bridge"
+            green "ueventd bridge in place -- old vendor, new tricks"
         fi
     else
         yellow "Legacy vendor/ueventd.rc is missing; skipping the ueventd bridge"
@@ -2586,7 +2567,7 @@ if [[ ${port_android_version} == 17 ]];then
             fi
         fi
         [[ $(grep -cFx "renameat2: 1" "${qspm_policy}") -eq 1 ]] || { error "Invalid renameat2 rule count in qspm.policy"; exit 1; }
-        green "qspm allows renameat2"
+        green "qspm allows renameat2 -- no more SIGSYS heartbreak"
     else
         yellow "qspm.policy not found; skipping qspm fix"
     fi
@@ -2613,7 +2594,7 @@ if [[ ${port_android_version} == 17 ]];then
             otatools/bin/apksigner sign --in "${a17_tmp}/OplusWifiResource-unsigned.apk" --out "${a17_tmp}/OplusWifiResource-signed.apk" --key otatools/key/testkey.pk8 --cert otatools/key/testkey.x509.pem --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true || { error "Failed to sign OplusWifiResource"; exit 1; }
             otatools/bin/apksigner verify --verbose "${a17_tmp}/OplusWifiResource-signed.apk" || { error "Signature verification failed"; exit 1; }
             cp -p "${a17_tmp}/OplusWifiResource-signed.apk" "${wifi_rro}"
-            green "OplusWifiResource.apk rebuilt and signed"
+            green "OplusWifiResource.apk rebuilt and signed -- Wi-Fi is short n' sweet again"
             rm -rf "${a17_tmp}"
         fi
     else
@@ -2776,7 +2757,7 @@ fi
 # is placed after device overlays and before fspatch/contextpatch/repack so
 # all generated metadata sees the final file tree.
 if ! _port::stage_postdata_compat; then
-    error "Android 16/17 post-data compatibility fixes failed"
+    error "Android 16/17 post-data fixes failed -- this one's a tearjerker"
     exit 1
 fi
 

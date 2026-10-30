@@ -6,7 +6,7 @@ reg query "HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Nls\Language" /v Inst
 if "%LANG%"=="Chinese" (
     TITLE windows 刷机脚本 [请勿选中窗口，卡住按右键或回车或放大缩小窗口恢复]
 ) else (
-    TITLE Windows Flash Script
+    TITLE Short n Sweet Flash Script
 )
 color 3f
 echo.
@@ -14,14 +14,14 @@ if exist "super.zst" (
     if "%LANG%"=="Chinese" (
         echo. 正在解压super镜像,耐心等待
     ) else (
-        echo. Extracting the super image, wait patiently
+        echo. Unpacking super.img... grab an espresso, this takes a sec
     )
     bin\windows\zstd.exe --rm -d super.zst -o super.img
     if not "%errorlevel%" == "0" (
         if "%LANG%"=="Chinese" (
             echo. 转换失败,按任意键退出
         ) else (
-            echo. Conversion failed. Press any key to exit
+            echo. Conversion failed - that is not sweet. Press any key to exit
         )
         pause >nul 2>nul
         exit
@@ -37,11 +37,11 @@ if "%LANG%"=="Chinese" (
     set /p input=请选择-默认选择1,回车执行:
 ) else (
     echo.
-    echo. 1. Preserve user data during flashing
+    echo. 1. Keep your data - nonsense-free dirty flash
     echo.
-    echo. 2. Wiping data
+    echo. 2. Wipe data - a clean slate, like it never happened
     echo.
-    set /p input=Please select - 1 is selected by default, and enter to execute:
+    set /p input=Pick one, babe - Enter = 1: 
 )
 
 if "%LANG%"=="Chinese" (
@@ -51,7 +51,7 @@ if "%LANG%"=="Chinese" (
     echo.
 ) else (
     echo.
-    echo. Validating device...please boot your device into bootloader and make sure your device code is device_code
+    echo. Checking the device... boot into bootloader and make sure it is device_code
     echo.
 )
 
@@ -69,10 +69,10 @@ if "%LANG%"=="Chinese" (
     set "msg_abort= 操作已被用户中止。"
     set "msg_continue_process=继续操作..."
 ) else (
-    set "msg_mismatch=Mismatching image and device."
+    set "msg_mismatch=Wrong phone, wrong package. Bed chem denied."
     set "msg_continue=Do you want to continue anyway? (y/n): "
-    set "msg_abort=Operation aborted by user."
-    set "msg_continue_process=Continuing with the process..."
+    set "msg_abort=Called it off. Nothing was flashed."
+    set "msg_continue_process=Your call, babe. Carrying on..."
 )
 
 :: 检查是否匹配
@@ -96,11 +96,11 @@ if "%LANG%"=="Chinese" (
     set /p kernel=请选择-默认选择1,回车执行:
 ) else (
     echo.
-    echo. 1. Flashing KernelSU boot.img
+    echo. 1. KernelSU boot.img - a little extra espresso
     echo.
-    echo. 2. Flahsing Official boot.img
+    echo. 2. Stock boot.img - short n sweet
     echo.
-    set /p kernel=Please select - 1 is selected by default, and enter to execute:
+    set /p kernel=Pick one, babe - Enter = 1: 
 )
 
 set "flash_boot=%~dp0boot_official.img"
@@ -112,22 +112,22 @@ if "%kernel%"=="1" (
     )
 )
 if not exist "%~dp0super.img" (
-    echo Required super.img is missing.
+    echo super.img is missing. Taste - it is not in the package.
     exit /B 1
 )
 if not exist "!flash_boot!" (
-    echo Required boot image is missing.
+    echo The boot image is missing - nothing to flash.
     exit /B 1
 )
 if not exist "!flash_dtbo!" (
-    echo Required dtbo image is missing.
+    echo The dtbo image is missing - nothing to flash.
     exit /B 1
 )
 if "%kernel%"=="1" (
     if "%LANG%"=="Chinese" (
         echo. 刷入第三方boot_ksu.img
     ) else (
-        echo. Flashing custom boot.img
+        echo. Flashing the custom kernel...
     )
 
     if exist "%~dp0boot_ksu.img" (
@@ -137,7 +137,7 @@ if "%kernel%"=="1" (
 		if "%LANG%"=="Chinese" (
 		echo. boot_ksu.img 不存在，刷入官方boot_official.img
 			) else (
-		echo. boot_ksu.img not exists, Flashing boot_official.img
+		echo. No boot_ksu.img in the package - flashing the stock kernel instead
 			)
 
         bin\windows\fastboot.exe flash boot "%~dp0boot_official.img" || exit /B 1
@@ -158,7 +158,7 @@ if "%input%" == "2" (
 	if "%LANG%"=="Chinese" (
 	    echo. 正在双清系统,耐心等待
     ) else (
-        echo. Wiping data, please wait patiently
+        echo. Wiping data... out with the old, please wait
     )
 	bin\windows\fastboot.exe erase userdata || exit /B 1
 	bin\windows\fastboot.exe erase metadata || exit /B 1
@@ -167,7 +167,7 @@ REM SET_ACTION_SLOT_A_BEGIN
 if "%LANG%"=="Chinese" (
 	echo. 设置活动分区为 'a'。可能需要一些时间。请勿手动重新启动或拔掉数据线，否则可能导致设备变砖。
 ) else (
-    echo. Starting the process to set the active slot to 'a.' This may take some time. Please refrain from manually restarting or unplugging the data cable, as doing so could result in the device becoming unresponsive.
+    echo. Setting slot A active. Please, please, please do not reboot or unplug the cable - it could brick the phone.
 )
 bin\windows\fastboot.exe set_active a || exit /B 1
 
@@ -178,7 +178,7 @@ bin\windows\fastboot.exe reboot || exit /B 1
 if "%LANG%"=="Chinese" (
     echo. 刷机完成,若手机长时间未重启请手动重启,按任意键退出
 ) else (
-    echo. Flash completed. If the phone does not restart for an extended period, please manually restart. Press any key to exit.
+    echo. All done - that is that me espresso. If the phone does not reboot on its own, reboot it manually. Press any key to exit.
 )
 pause
 exit
